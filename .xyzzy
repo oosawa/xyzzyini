@@ -1,0 +1,420 @@
+;;; -*- Mode: lisp;  -*-
+
+;;;;;;;;;;;;;;;;;
+;; ■ NetInstaller
+(require "ni/setup")
+;; 自動設定を利用する
+(ni-autoload)
+
+;;;;;;;;;;;;;;;;;
+;; ■ ruby-mode
+(load-library "ruby-mode")
+(push '("\\.rb$" . ruby-mode) *auto-mode-alist*)
+; インデント量を変える。nilの時はタブを挿入
+(setq *ruby-indent-column* nil)
+
+(require "hateda-mode")
+
+;;;;;;;;;;;;;;;;;;
+;; ■ html+-mode
+(require 'html+-mode)
+; ----- クリップボードを実体参照+<br>付加して張り付け
+;; http://web.archive.org/web/20040224220531/http://members4.tsukaeru.net/skry/xyzzy.html#skr-ins-edited-clipboard
+(defun skr-ins-edited-clipboard()
+  (interactive)
+  (when (get-clipboard-data)
+    (let ((skr-clip (get-clipboard-data)))
+      (delete-selection);    選択範囲は削除
+      (setq skr-clip (substitute-string skr-clip "&" "&amp;"))
+      (setq skr-clip (substitute-string skr-clip "  " "&nbsp; "))
+      (setq skr-clip (substitute-string skr-clip "\t" "&nbsp; &nbsp; "))
+     ;(setq skr-clip (substitute-string skr-clip "\"" "&quot;"));  増長すぎ
+      (setq skr-clip (substitute-string skr-clip "<" "&lt;"))
+      (setq skr-clip (substitute-string skr-clip ">" "&gt;"))
+      (setq skr-clip (substitute-string skr-clip "\n" "<br />\n"))
+      (insert skr-clip))))
+
+;; クリップボードの中身が http:// で始まっていたら、リンクをつけてペースト
+;; http://hie.s64.xrea.com/xyzzy/note/edit.html#insert-url-with-link
+(defun insert-url-with-link ()
+  (interactive "*")
+  (let* ((cb (get-clipboard-data))
+         (text (if (pre-selection-p) 
+                  (buffer-substring (selection-mark) (selection-point)))
+              cb))
+    (cond
+     ((and (stringp cb)
+           (string-match "^\\(ht\\|f\\)tps?://.+" cb))
+      (if (pre-selection-p) (delete-selection))
+      (insert (format nil "<a href=\"~A\">~A</a>" cb text)))
+     (t (message "URLではないようです")))))
+
+(add-hook '*html+-mode-hook*
+          #'(lambda ()(interactive)
+              (define-key *html+-mode-map* #\M-i 'insert-url-with-link)
+              (define-key *html+-mode-map* #\M-b 'skr-ins-edited-clipboard)
+			  ))
+
+;;;;;;;;;;;;;;;;;;;
+;; ■ 行セレクションを上下に移動
+;; http://blue.ribbon.to/~aotororo/prog/200310.html#d08_t4
+(defun transpose-selection-down (&optional (n 1))
+  "行セレクションを n 行下に移動"
+  (interactive "*p")
+  (let ((pre-selection-type (get-selection-type))
+        (column (current-column)))
+    (unless pre-selection-type
+      (goto-bol)
+      (start-selection 1 t)
+      (or (forward-line 1)
+          (progn (goto-eol) (insert #\LFD))))
+    (selection-start-end (beg end)
+      (when (and (goto-char end) (bolp)
+                 (goto-char beg) (bolp))
+        (insert (prog1
+                    (buffer-substring beg end)
+                  (delete-region beg end)
+                  (forward-line n)
+                  (and (minusp (1- (get-window-line)))
+                       (recenter 1))
+                  (when pre-selection-type
+                    (start-selection pre-selection-type t))))
+        (unless pre-selection-type
+          (forward-line -1)
+          (goto-column column))))))
+(defun transpose-selection-up (&optional (n 1))
+  "行セレクションを n 行上に移動"
+  (interactive "*p")
+  (transpose-selection-down (- n)))
+(global-set-key #\S-M-Down 'transpose-selection-down)
+(global-set-key #\S-M-Up 'transpose-selection-up)
+
+
+
+;;;;;;;;;;;;;;;;;
+;; ■ タブの気持ちで半角スペース
+(defun insert-space-like-tab ()
+  (interactive)
+  (let ((tab (tab-columns (selected-buffer))))
+    (insert " " (- tab (mod (current-column) tab)))))
+(global-set-key #\C-2 'insert-space-like-tab)
+
+
+;;;;;;;;;;;;;;;;;;
+;; ■ lisp-mode
+
+;; インデントをスペースで
+(setf *lisp-indent-tabs-mode* nil)
+
+;; キーワードハイライトを有効に
+;; http://www.geocities.co.jp/SiliconValley-SanJose/7474/LispDevelopEnvironment.html#xyzzy
+(add-hook '*lisp-mode-hook*
+  #'(lambda ()
+       (make-local-variable 'keyword-hash-table)
+       (setf keyword-hash-table (load-keyword-file "lisp"))
+       (make-local-variable 'regexp-keyword-list)
+       (setf regexp-keyword-list
+          (compile-regexp-keyword-list
+            '(("(" t (:color 14))
+              (")" t (:color 14)))))))
+
+;;;;;;;;;;;;;;;;;
+;; ■ 電卓
+(setq ed::*calc-ratio* 'float)
+(defun caliculator ()
+  (interactive)(split-window 4)(calc))
+
+;;;;;;;;;;;;;;;;;
+;; ■ バッファ名に親ディレクトリ名を足す
+;; http://hie.s64.xrea.com/xyzzy/note2/wiki.cgi?page=Buffer
+(defun add-parent-directory-name-to-buffer-name ()
+  (let ((file-name (get-buffer-file-name)))
+    (when file-name
+      (setq file-name (split-string file-name "/"))
+      (setq file-name (nthcdr (- (list-length file-name) 2) file-name))
+      (rename-buffer (concat (cond ((equal buffer-mode 'css-mode) "# ") (t ""))
+                             (car file-name) "/" (cadr file-name))))))
+(add-hook 'ed::*html+-mode-hook* 'add-parent-directory-name-to-buffer-name)
+(add-hook 'ed::*css-mode-hook* 'add-parent-directory-name-to-buffer-name)
+
+
+;;;;;;;;;;;;;;;;;
+;; ■ javascript-mode
+(load-library "javascript-mode")
+(push '("\\.js$" . javascript-mode) *auto-mode-alist*)
+
+
+
+
+;;;;;;;;;;;;;;;;;
+;; ■ 全体をインデント
+;; http://www.osamurai.flnet.org/memo/xyzzy/tips
+(defun indent-current-buffer ()
+  (interactive)
+  (when mode-specific-indent-command
+    (indent-region (point-min) (point-max))
+    (message "indent buffer")))
+(global-set-key #\C-F8 'indent-current-buffer)
+(set-function-bar-label #\C-F8 "全体をインデント")
+
+;;;;;;;;;;;;;;;;;
+;; ■ ポップアップ
+(setq *popup-completion-list-default* :always)
+(setq *minibuffer-popup-completion-list* :always)
+
+;;;;;;;;;;;;;;;;;
+;; ■ howm
+(pushnew (merge-pathnames "site-lisp/howm/" (si:system-root))
+                 *load-path* :test #'string-equal)
+(require "howm-wrap")
+
+
+;;;;;;;;;;;;;;;;;
+;; ■ dabbrev 同じバッファ内を検索してワードを補完してくれる機能
+(require "dabbrev")
+(global-set-key #\C-\. 'dabbrev-expand)
+(global-set-key #\C-\; 'dabbrev-popup)
+
+
+;;;;;;;;;;;;;;;;;
+;; ■ インクリメンタルサーチ
+(require "isearch")
+
+
+;;;;;;;;;;;;;;;;;
+;; ■ psearch ポップアップリストで検索
+(require "psearch")
+(global-set-key #\C-] 'psearch-popup-string-list)
+(global-set-key #\M-] 'psearch-popup-list-again)
+(global-set-key #\C-: 'psearch-popup-string-list-word-search)
+(global-set-key #\M-: 'psearch-popup-list-again-word-search)
+(global-set-key #\C-M-] 'psearch-goto-return-point)
+
+
+;;;;;;;;;;;;;;;;;
+;; ■ pickup-pattern
+(require "pickup-pattern")
+;;; --- 検索設定 ---
+;;; 検索文字列を pickup (消去は pickup-pattern-unset-all 等で)
+;; 検索前に pickup 表示を全て解除
+(setq *pickup-pattern-pre-search-unset* t)
+;; 検索文字列をリストに追加
+(setq *pickup-pattern-search-pattern-add* nil)
+
+;; (正規表現)検索文字列入力時のみ色づけしたい場合はこっちの関数を
+(global-set-key #\M-s 're-search-forward-pickup)
+(global-set-key #\M-C-s 're-search-backward-pickup)
+;; repeat-forward-search, repeat-backward-search 等、どの検索時にも色づけしたい
+;; 場合は上のでなく、既存の関数の hook に引っかける。(毎回色づけするので遅いかも)
+(add-hook '*show-match-hook* 'pickup-pattern-last-search)
+
+;;; --- フック設定 ---
+;; pickup 時は paren を括弧のみに (喜多さん paren.l)
+(require "paren")
+(add-hook '*pickup-pattern-set-hook*
+          #'(lambda () (setq *paren-highlight-only-paren* t)))
+(add-hook '*pickup-pattern-unset-all-hook*
+          #'(lambda () (setq *paren-highlight-only-paren* nil)))
+
+
+;;;;;;;;;;;;;;;;;
+;; ■ URIクリック
+(require "clickable-uri")
+;; 強調表示は「表示色4 (青)」＋アンダーライン
+(setq *clickable-uri-keyword-color* '(:color 8 0 :underline))
+;; オープン時の強調表示は「文字色4(青)」「アンダーライン」「ボールド」
+(setq *clickable-uri-open-attribute* '(:foreground 8 :underline t :bold t))
+;; オープン時の強調表示時間は 0.2 秒
+(setq *clickable-uri-open-attribute-timeout* 0.2)
+;; uri 構成文字と見なす文字を拡張
+(setq *clickable-uri-chars*
+      "-a-zA-Z0-9_/~.@?&=;+(),'$!*:#%|０-９Ａ-Ｚａ-ｚぁ-んァ-ヶ亜-熙")
+;; http: https: scheme をオープンするコマンドを指定
+(push '("^https?:" . "c:/Program Files/Mozilla Firefox/firefox.exe")
+      *clickable-uri-open-command-alist*)
+;; 設定変更を反映
+(clickable-uri-set-regexp)
+
+(global-set-key #\C-l 'clickable-uri-recenter)
+(global-set-key '(#\C-c #\C-l) 'clickable-uri-emphasis-force)
+(global-set-key '(#\C-c #\C-o) 'clickable-uri-open)
+
+
+;;;;;;;;;;;;;;;;;
+;; ■ バックアップ場所指定
+(require "backup")
+(setq *backup-directory* "E:/backup/editer/")
+(setq *hierarchic-backup-directory* t)
+
+#|
+;;;;;;;;;;;;;;;;;
+;; ■ howm もどきファイルを作成したり開いたり
+(defvar *howm-dir-path* "~/howm")
+(defun make-howm-modoki-file (howm-dir)
+  (let* ((filename (format-date-string "%Y/%m/%Y_%m_%d_%H%M%S.howm"))
+		 (filepath (merge-pathnames filename howm-dir))
+		 (directory (directory-namestring filepath)))
+	(if (not (file-directory-p directory))
+		(create-directory directory))
+	(find-file filepath)
+	(if (eq (point-max) (point-min))
+		(progn
+		  (insert (format-date-string "= \n[%Y-%m-%d %H:%M]\n"))
+		  (goto-char (+ (point-min) 2))))
+	))
+(defun howm-modoki-create ()
+  (interactive)
+  (make-howm-modoki-file *howm-dir-path*))
+(defun open-howm-dir-this-month (howm-dir)
+  (let* ((dir (format-date-string "%Y/%m/"))
+		 (dirpath (merge-pathnames dir howm-dir))
+		 file)
+	(when (file-directory-p dirpath)
+	  (setf file (filer dirpath nil "howm" nil))
+	  (when (not (file-directory-p file)) (find-file file))
+		)))
+(defun howm-open-nowdir ()
+  (interactive)
+  (open-howm-dir-this-month *howm-dir-path*))
+;; キー設定
+(global-set-key '(#\C-c #\, #\c) 'howm-modoki-create)
+(global-set-key '(#\C-c #\, #\f) 'howm-open-nowdir)
+|#
+
+
+;;;;;;;;;;;;;;;;;
+;; ■ www-mode
+(autoload 'www "www/www" t)	                ; 通常起動
+(autoload 'www-open-url "www/www" t)            ; URLを指定して起動
+(autoload 'www-open-local-file "www/www" t)     ; ローカルのファイルを指定して開く
+(autoload 'www-open-current-buffer "www/www" t)	; 現在のバッファのファイルを開く
+
+
+
+;;;;;;;;;;;;;;;;;
+;; ■ sql-mode -- で始まる行をコメント文にする。
+;; http://hie.s64.xrea.com/xyzzy/note/major_mode.html#sql-mode
+(in-package "editor")
+(add-hook '*sql-mode-hook*
+          #'(lambda ()
+              (set-syntax-start-c++-comment *sql-mode-syntax-table* #\-)
+              (set-syntax-end-c++-comment *sql-mode-syntax-table* #\LFD)))
+(in-package "user")
+
+
+
+
+;;;;;;;;;;;;;;;;;
+;; ■ *scratch* をメモ代わりに使う。
+
+;; *scratch* を終了時に保存
+(add-hook '*kill-xyzzy-hook*
+          #'(lambda ()
+              (save-excursion
+                (set-buffer (find-buffer "*scratch*"))
+                (write-file "~/scratch")
+; ~/memorandom フォルダに毎回日付と時刻が含まれるファイル名で
+; 保存する場合はフォルダを作ってこの下2行をコメントアウト。(履歴もどき)
+              (unless (equal (point-min) (point-max))
+                (write-file (format-date-string "~/memorandom/%Y_%m_%d_%H%M_scratch.txt")))
+                )))
+
+;; *scratch* を起動時にロード
+(add-hook '*post-startup-hook*
+          #'(lambda ()
+              (save-excursion
+                (set-buffer (find-buffer "*scratch*"))
+                (insert-file-contents "~/scratch" t))))
+
+;; *scratch* な場合は nil を返してkillさせない
+(add-hook '*query-kill-buffer-hook*
+          #'(lambda ()
+              (if (and (not *kill-buffer-kills-scratch*)
+                       (equal (buffer-name (selected-buffer))
+                              "*scratch*"))
+                  nil
+                t)))
+
+
+;;;;;;;;;;;;;;;;;;
+;; ■ バッファをさくさく切り替えたい（改変版）
+;; http://www9.ocn.ne.jp/~y-kwsk/luvtechno/xyzzy.html#next-buffer
+(setq *next-buffer-in-tab-order* t) ; バッファ移動をタブ順に
+(global-set-key #\C-PageUp 'previous-buffer) ; 前のバッファに移動
+(global-set-key #\C-PageDown 'next-buffer) ; 後のバッファに移動
+
+;;;;;;;;;;;;;;;;;;
+;; ■ ウィンドウをさくさく切り替えたい（改変版）
+;; http://www9.ocn.ne.jp/~y-kwsk/luvtechno/xyzzy.html#other-window
+(global-set-key #\C-S-PageUp 'move-previous-window)
+(global-set-key #\C-S-PageDown 'other-window)
+
+;;;;;;;;;;;;;;;;;;
+;; ■ フレームの切り替え用ショートカットキー
+(global-set-key #\M-S-Right 'other-pseudo-frame)
+(global-set-key #\M-S-Left 'previous-pseudo-frame)
+
+
+;;;;;;;;;;;;;;;;;
+;; ■ 行頭まで削除（戻ってKill-line）
+;; http://hie.s64.xrea.com/xyzzy/note/edit.html#backward-kill-line
+(defun backward-kill-line ()
+  (interactive)
+  (kill-region (point) (progn (goto-bol) (point))))
+(set-extended-key-translate-table exkey-C-backspace #\F13)
+(global-set-key #\F13 'backward-kill-line)
+
+
+;;;;;;;;;;;;;;;;;
+;; ■ kill-line（カーソルが行頭にある場合は、いっきに行削除）
+;; http://hie.s64.xrea.com/xyzzy/note/edit.html#my-kill-line
+(defun my-kill-line (&optional arg)
+  (interactive "*p")
+  (cond ((bolp)
+	 (let ((point (point))
+	       (lines (cond ((or (null arg)
+				 (<= arg 1))
+			     0)
+			    (t
+			     (- arg 1)))))
+	   (kill-region point
+			(progn
+			  (forward-line lines)
+			  (goto-eol)
+			  (forward-char)
+			  (point)))))
+	(t
+	 (kill-line arg))))
+(define-key *global-keymap* #\C-k 'my-kill-line)
+
+
+;;;;;;;;;;;;;;;;;;
+;; ■ つねにCtrl＋TABでタブを挿入
+(global-set-key #\C-F15 #'(lambda () (interactive) (insert "\t")))
+(set-extended-key-translate-table exkey-C-tab #\C-F15)
+
+
+;;;;;;;;;;;;;;;;;;
+;; ■  ミニバッファ内での編集のときに、行数に応じて自動的にenlarge-windowします
+;; http://www1.odn.ne.jp/ymtz/tips.html#minibuf
+(defun minibuf-resize ()
+  (when (minibuffer-window-p (selected-window))
+    (let ((l (save-excursion
+               (goto-char (point-max))
+               (current-line-number)))
+          (h (window-height)))
+      (when (< 10 l)
+        (setq l 10))
+      (unless (= l h)
+        (enlarge-window (- l h))
+        (refresh-screen)))))
+(add-hook '*post-command-hook* 'minibuf-resize)
+
+
+;;;;;;;;;;;;;;;;;;
+;; ■ ステータスバーの表示
+(setq *status-bar-format* "cupT")
+
+
+(require "winkey2.l")
+
